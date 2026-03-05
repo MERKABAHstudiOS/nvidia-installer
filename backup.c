@@ -1495,6 +1495,7 @@ int run_existing_uninstaller(Options *op)
                           uninstaller, " -s --log-file-name=",
                           uninstall_log_path,
                           skip_depmod ? " --skip-depmod" : NULL,
+                          op->nvidia_vt_detected ? " --skip-module-unload" : NULL,
                           NULL);
         ui_indeterminate_end(op);
 

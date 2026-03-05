@@ -825,7 +825,8 @@ int set_destinations(Options *op, Package *p)
 
         case FILE_TYPE_SYSTEMD_UNIT:
             prefix = op->systemd_unit_prefix;
-            dir = path = "";
+            path = p->entries[i].path;
+            dir = "";
             break;
 
         case FILE_TYPE_SYSTEMD_UNIT_SYMLINK:
@@ -2233,6 +2234,8 @@ static char * const native_libdirs[] = {
     DEFAULT_AARCH64_TRIPLET_LIBDIR,
 #elif defined(NV_PPC64LE)
     DEFAULT_PPC64LE_TRIPLET_LIBDIR,
+#elif defined(NV_RISCV64)
+    DEFAULT_RISCV64_TRIPLET_LIBDIR,
 #else
 #error Unknown architecture! Please update utils.mk to add support for this \
 TARGET_ARCH, and make sure that an architecture-specific NV_$ARCH macro gets \

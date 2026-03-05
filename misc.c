@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/stat.h>
@@ -38,6 +39,7 @@
 #include <pciaccess.h>
 #include <elf.h>
 #include <link.h>
+#include <linux/major.h>
 
 #include "nvidia-installer.h"
 #include "user-interface.h"
@@ -1661,6 +1663,115 @@ int check_for_running_x(Options *op)
     return TRUE;
 
 } /* check_for_running_x() */
+
+/*
+ * check_for_nvidia_fb_console() - Check if nvidia-drm is driving any
+ * framebuffer device by examining /sys/class/graphics/fb[0-9]/device/driver
+ * symlinks. Returns TRUE if 'nvidia' is detected.
+ */
+
+static int check_for_nvidia_fb_console(Options *op)
+{
+    DIR *dir = opendir("/sys/class/graphics");
+    struct dirent *entry;
+    int ret = FALSE;
+
+    if (!dir) return FALSE;
+
+    while ((entry = readdir(dir))) {
+        /* Look for fb* entries */
+        if (strncmp(entry->d_name, "fb", 2) == 0) {
+            char *driver_path = nvstrcat("/sys/class/graphics/",
+                                         entry->d_name,
+                                         "/device/driver",
+                                         NULL);
+            const char match_string[] = "/nvidia";
+            const ssize_t match_len = strlen(match_string);
+            char driver_target[PATH_MAX];
+            ssize_t len = readlink(driver_path, driver_target,
+                                   sizeof(driver_target));
+
+            free(driver_path);
+
+            if (len >= match_len &&
+                strncmp(driver_target + (len - match_len),
+                        match_string,
+                        match_len) == 0) {
+
+                ui_log(op, "Detected nvidia driver on framebuffer device '%s'",
+                       entry->d_name);
+                ret = TRUE;
+                break;
+            }
+        }
+    }
+
+    closedir(dir);
+    return ret;
+}
+
+/*
+ * check_for_vt_output() - Check if stdout is a virtual terminal.
+ * Returns TRUE if stdout is a VT.
+ */
+
+static int check_for_vt_output(Options *op)
+{
+    struct stat st;
+
+    if (fstat(STDOUT_FILENO, &st) == 0) {
+        if (S_ISCHR(st.st_mode) && major(st.st_rdev) == TTY_MAJOR) {
+            ui_log(op, "Stdout is a virtual terminal");
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+/*
+ * check_for_nvidia_active_vt() - Check if nvidia-drm is driving a framebuffer
+ * console and we're running on a VT.  If this condition is detected, print a
+ * warning message, set op->nvidia_vt_detected, and give the user a choice
+ * whether to continue installing (return TRUE) or abort (return FALSE).
+ */
+
+int check_for_nvidia_active_vt(Options *op)
+{
+    /*
+     * If we are installing for a non-running kernel *and* we are only
+     * installing kernel modules, then skip this check.
+     */
+
+    if (op->kernel_modules_only && op->kernel_name) {
+        ui_log(op, "Only installing kernel modules for a non-running "
+               "kernel; skipping the nvidia-drm framebuffer checks.");
+        return TRUE;
+    }
+
+    if (check_for_nvidia_fb_console(op) && check_for_vt_output(op)) {
+        int choice = ui_multiple_choice(op, CONTINUE_ABORT_CHOICES,
+                NUM_CONTINUE_ABORT_CHOICES, CONTINUE_CHOICE,
+                "You appear to be installing the driver on a terminal using "
+                "nvidia-drm.  The installer will not be able to detect some "
+                "potential installation problems.");
+
+        if (choice == CONTINUE_CHOICE) {
+            op->nvidia_vt_detected = TRUE;
+            op->skip_module_load = TRUE;
+
+            ui_warn(op, "Continuing installation without unloading the "
+                    "previous driver.  It is highly recommended that you "
+                    "reboot your computer after installation to use the newly "
+                    "installed driver.");
+        } else {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+
+} /* check_for_nvidia_active_vt() */
 
 /*
  * is_vgpu_host_package() - Check if 'is_vgpu_host_package.txt' file is present
@@ -3326,6 +3437,10 @@ void suggest_reboot(Options *op)
     if (op->running_x_server_detected) {
         add_bullet_list_item("A running X server was detected during "
                              "installation.", &reason);
+    }
+
+    if (op->nvidia_vt_detected) {
+        add_bullet_list_item("The display was in use during installation.", &reason);
     }
 
     if (nouveau_is_present()) {

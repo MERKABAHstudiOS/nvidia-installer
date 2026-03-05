@@ -679,7 +679,7 @@ int update_initramfs(Options *op)
                 ui_error(op, "Failed to rebuild the initramfs!");
             }
         } else {
-            ui_log(op, "The initramfs will not be rebuild.");
+            ui_log(op, "The initramfs will not be rebuilt.");
             ret = TRUE;
         }
     } else if (reason[0]) {

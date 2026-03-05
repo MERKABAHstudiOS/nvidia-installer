@@ -133,6 +133,10 @@ int install_from_cwd(Options *op)
 
     if (!check_for_running_x(op)) goto failed;
 
+    /* check if nvidia-drm might be displaying the installer UI */
+
+    if (!check_for_nvidia_active_vt(op)) goto failed;
+
     /* run the distro pre unload hook */
     res = run_distro_hook(op, "pre-unload");
     if (res == HOOK_SCRIPT_FAIL) {

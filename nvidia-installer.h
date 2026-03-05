@@ -230,6 +230,7 @@ typedef struct __options {
     int allow_installation_with_running_driver;
     int loaded_kernel_module_detected;
     int running_x_server_detected;
+    int nvidia_vt_detected;
 
     NVOptionalBool install_libglx_indirect;
     NVOptionalBool install_libglvnd_libraries;
@@ -513,6 +514,7 @@ typedef struct __package {
 #define DEFAULT_ARMV7HF_TRIPLET_LIBDIR  "lib/arm-linux-gnueabihf"
 #define DEFAULT_AARCH64_TRIPLET_LIBDIR  "lib/aarch64-linux-gnu"
 #define DEFAULT_PPC64LE_TRIPLET_LIBDIR  "lib/powerpc64le-linux-gnu"
+#define DEFAULT_RISCV64_TRIPLET_LIBDIR  "lib/riscv64-linux-gnu"
 #define DEFAULT_WINE_LIBDIR_SUFFIX      "nvidia/wine"
 #define DEFAULT_BINDIR                  "bin"
 #define DEFAULT_X_MODULEDIR             "modules"

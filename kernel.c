@@ -1487,7 +1487,8 @@ static int test_kernel_modules_helper(Options *op, Package *p, int pause_udev)
 
         if (strcmp(p->kernel_modules[i].module_name, "nvidia") == 0) {
             module_opts = "NVreg_DeviceFileUID=0 NVreg_DeviceFileGID=0 "
-                          "NVreg_DeviceFileMode=0 NVreg_ModifyDeviceFiles=0";
+                          "NVreg_DeviceFileMode=0 NVreg_ModifyDeviceFiles=0 "
+                          "NVreg_ExcludeAllGpus=1";
         } else if (strcmp(p->kernel_modules[i].module_name, "nvidia-drm") == 0) {
             /*
              * Don't allow nvidia-drm to try to initialize the GPUs. We just
@@ -1681,6 +1682,16 @@ int check_for_unloaded_kernel_module(Options *op)
     if (op->no_kernel_modules) {
         ui_log(op, "Not installing any kernel modules; skipping the \"is an "
                "NVIDIA kernel module loaded?\" test.");
+        return TRUE;
+    }
+
+    /*
+     * Skip the check if nvidia-drm might be driving the VT that
+     * nvidia-installer is running on.
+     */
+    if (op->nvidia_vt_detected) {
+        ui_log(op, "Skipping the \"is an NVIDIA kernel module loaded?\" "
+               "test because an NVIDIA framebuffer console was detected.");
         return TRUE;
     }
 
