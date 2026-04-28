@@ -231,6 +231,7 @@ typedef struct __options {
     int loaded_kernel_module_detected;
     int running_x_server_detected;
     int nvidia_vt_detected;
+    int release_fb_console;
 
     NVOptionalBool install_libglx_indirect;
     NVOptionalBool install_libglvnd_libraries;

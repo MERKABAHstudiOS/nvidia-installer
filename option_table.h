@@ -121,6 +121,7 @@ enum {
     ALLOW_INSTALLATION_WITH_RUNNING_DRIVER_OPTION,
     REBUILD_INITRAMFS_OPTION,
     PRINT_RECOMMENDED_MODULE_TYPE_OPTION,
+    RELEASE_FB_CONSOLE_OPTION,
 };
 
 static const NVGetoptOption __options[] = {
@@ -749,6 +750,12 @@ static const NVGetoptOption __options[] = {
       ALLOW_INSTALLATION_WITH_RUNNING_DRIVER_OPTION, NVGETOPT_IS_BOOLEAN, NULL,
       "Proceed with installation even if an NVIDIA driver is already installed "
       "and running."
+    },
+
+    { "release-fb-console", RELEASE_FB_CONSOLE_OPTION, 0, NULL,
+      "When installing on a virtual terminal that appears to use nvidia-drm "
+      "for the framebuffer console, unload the nvidia kernel modules before "
+      "proceeding instead of skipping the module unload."
     },
 
     { "rebuild-initramfs",

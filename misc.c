@@ -27,7 +27,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
-#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/stat.h>
@@ -1667,7 +1666,8 @@ int check_for_running_x(Options *op)
 /*
  * check_for_nvidia_fb_console() - Check if nvidia-drm is driving any
  * framebuffer device by examining /sys/class/graphics/fb[0-9]/device/driver
- * symlinks. Returns TRUE if 'nvidia' is detected.
+ * symlinks. Returns TRUE if 'nvidia' is detected or if no fb[0-9] devices are
+ * found.
  */
 
 static int check_for_nvidia_fb_console(Options *op)
@@ -1675,12 +1675,13 @@ static int check_for_nvidia_fb_console(Options *op)
     DIR *dir = opendir("/sys/class/graphics");
     struct dirent *entry;
     int ret = FALSE;
+    int found_any_fb_device = FALSE;
 
     if (!dir) return FALSE;
 
     while ((entry = readdir(dir))) {
-        /* Look for fb* entries */
-        if (strncmp(entry->d_name, "fb", 2) == 0) {
+        /* Look for fb[0-9] device entries */
+        if (strncmp(entry->d_name, "fb", 2) == 0 && isdigit(entry->d_name[2])) {
             char *driver_path = nvstrcat("/sys/class/graphics/",
                                          entry->d_name,
                                          "/device/driver",
@@ -1692,6 +1693,8 @@ static int check_for_nvidia_fb_console(Options *op)
                                    sizeof(driver_target));
 
             free(driver_path);
+
+            found_any_fb_device = TRUE;
 
             if (len >= match_len &&
                 strncmp(driver_target + (len - match_len),
@@ -1707,23 +1710,110 @@ static int check_for_nvidia_fb_console(Options *op)
     }
 
     closedir(dir);
+
+    /*
+     * If no fb device entries were found (e.g. CONFIG_FB_DEVICE is not set
+     * in the kernel), fall back to checking nvidia-drm module parameters to
+     * infer whether nvidia-drm might be driving the framebuffer console.
+     */
+    if (!found_any_fb_device) {
+        char *modeset_val = NULL, *fbdev_val = NULL;
+
+        if (read_text_file("/sys/module/nvidia_drm/parameters/modeset",
+                           &modeset_val) &&
+            read_text_file("/sys/module/nvidia_drm/parameters/fbdev",
+                           &fbdev_val) &&
+            modeset_val[0] == 'Y' &&
+            fbdev_val[0] == 'Y') {
+
+            ui_log(op, "No fb device entries found; nvidia-drm modeset and "
+                       "fbdev parameters are both enabled");
+            ret = TRUE;
+        }
+
+        nvfree(modeset_val);
+        nvfree(fbdev_val);
+    }
+
     return ret;
 }
 
 /*
- * check_for_vt_output() - Check if stdout is a virtual terminal.
- * Returns TRUE if stdout is a VT.
+ * check_for_vt_output() - Determine if the installer or its ancestors are a
+ * running on a virtual terminal
+ *
+ * Walk up the process tree and inspect each process's controlling terminal via
+ * /proc/<pid>/stat.
+ *
+ * The seventh field of /proc/<pid>/stat is tty_nr, encoding the major and minor
+ * device numbers of the process's controlling terminal. If the major number is
+ * TTY_MAJOR, assume the process is on a virtual terminal. Otherwise, check the
+ * parent process. Stop when tty_nr is 0 (no controlling terminal) or when the
+ * top of the process tree is reached.
  */
 
 static int check_for_vt_output(Options *op)
 {
-    struct stat st;
+    pid_t pid = getpid();
 
-    if (fstat(STDOUT_FILENO, &st) == 0) {
-        if (S_ISCHR(st.st_mode) && major(st.st_rdev) == TTY_MAJOR) {
-            ui_log(op, "Stdout is a virtual terminal");
+    while (pid > 0) {
+        FILE *f;
+        char path[64];
+        char buf[512];
+        char *p;
+        int ppid, tty_nr, tty_major;
+
+        snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+
+        f = fopen(path, "r");
+        if (!f) {
+            ui_log(op, "Failed to open %s; assuming a VT", path);
             return TRUE;
         }
+
+        if (!fgets(buf, sizeof(buf), f)) {
+            fclose(f);
+            ui_log(op, "Failed to read %s; assuming a VT", path);
+            return TRUE;
+        }
+
+        fclose(f);
+
+        /*
+         * The comm field (field 2) is in parentheses and may contain spaces
+         * or other special characters.  Find the last ')' to skip past it.
+         */
+        p = strrchr(buf, ')');
+        if (!p) {
+            ui_log(op, "Failed to parse %s; assuming a VT", path);
+            return TRUE;
+        }
+
+        /* Fields after ')': state ppid pgrp session tty_nr ... */
+        if (sscanf(p + 1, " %*c %d %*d %*d %d",
+                   &ppid, &tty_nr) != 2) {
+            ui_log(op, "Failed to parse tty_nr from %s; assuming a VT",
+                   path);
+            return TRUE;
+        }
+
+        if (tty_nr == 0) {
+            ui_log(op, "Process %d has no controlling terminal", (int)pid);
+            return FALSE;
+        }
+
+        /*
+         * Decode tty_nr per proc_pid_stat(5): the major device number is in
+         * bits 15-8.
+         */
+        tty_major = (tty_nr >> 8) & 0xff;
+
+        if (tty_major == TTY_MAJOR) {
+            ui_log(op, "Process %d is on a VT", pid);
+            return TRUE;
+        }
+
+        pid = ppid;
     }
 
     return FALSE;
@@ -1750,13 +1840,44 @@ int check_for_nvidia_active_vt(Options *op)
     }
 
     if (check_for_nvidia_fb_console(op) && check_for_vt_output(op)) {
-        int choice = ui_multiple_choice(op, CONTINUE_ABORT_CHOICES,
-                NUM_CONTINUE_ABORT_CHOICES, CONTINUE_CHOICE,
-                "You appear to be installing the driver on a terminal using "
-                "nvidia-drm.  The installer will not be able to detect some "
-                "potential installation problems.");
+        enum {
+            FB_CONSOLE_CONTINUE_WITHOUT_UNLOADING = 0,
+            FB_CONSOLE_UNLOAD_ANYWAY,
+            FB_CONSOLE_ABORT,
+            NUM_FB_CONSOLE_CHOICES
+        };
 
-        if (choice == CONTINUE_CHOICE) {
+        static const char * const choices[] = {
+            [FB_CONSOLE_CONTINUE_WITHOUT_UNLOADING] =
+                "Install without unloading",
+            [FB_CONSOLE_UNLOAD_ANYWAY] =
+                "Unload anyway",
+            [FB_CONSOLE_ABORT] =
+                "Abort installation",
+        };
+
+        int choice;
+
+        if (op->release_fb_console) {
+            ui_log(op, "Continuing per the '--release-fb-console' option.");
+            choice = FB_CONSOLE_UNLOAD_ANYWAY;
+        } else {
+            choice = ui_multiple_choice(op, choices, NUM_FB_CONSOLE_CHOICES,
+                    FB_CONSOLE_CONTINUE_WITHOUT_UNLOADING,
+                    "The installer has detected that its output may be "
+                    "displayed on a monitor connected to an NVIDIA GPU, and "
+                    "that the install process may disrupt the output on that "
+                    "monitor if the previous driver is unloaded.  You may "
+                    "install without unloading the previous driver, after "
+                    "which it is recommended that you reboot your computer to "
+                    "use the new driver.  Or you may unload the previous "
+                    "driver anyway.  If installing without unloading, the "
+                    "installer will not be able to detect some potential "
+                    "installation problems.");
+        }
+
+        switch (choice) {
+        case FB_CONSOLE_CONTINUE_WITHOUT_UNLOADING:
             op->nvidia_vt_detected = TRUE;
             op->skip_module_load = TRUE;
 
@@ -1764,7 +1885,12 @@ int check_for_nvidia_active_vt(Options *op)
                     "previous driver.  It is highly recommended that you "
                     "reboot your computer after installation to use the newly "
                     "installed driver.");
-        } else {
+            break;
+
+        case FB_CONSOLE_UNLOAD_ANYWAY:
+            break;
+
+        case FB_CONSOLE_ABORT:
             return FALSE;
         }
     }

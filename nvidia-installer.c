@@ -568,6 +568,9 @@ static void parse_commandline(int argc, char *argv[], Options *op)
         case ALLOW_INSTALLATION_WITH_RUNNING_DRIVER_OPTION:
             op->allow_installation_with_running_driver = boolval;
             break;
+        case RELEASE_FB_CONSOLE_OPTION:
+            op->release_fb_console = TRUE;
+            break;
         case REBUILD_INITRAMFS_OPTION:
             op->rebuild_initramfs = boolval ? NV_OPTIONAL_BOOL_TRUE :
                                               NV_OPTIONAL_BOOL_FALSE;
