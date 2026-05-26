@@ -78,7 +78,6 @@ char *find_system_util(const char *util);
 int find_system_utils(Options *op);
 int find_module_utils(Options *op);
 int check_selinux(Options *op);
-int check_proc_modprobe_path(Options *op);
 int check_development_tools(Options *op, Package *p);
 int check_precompiled_kernel_interface_tools(Options *op);
 char *extract_version_string(const char *str);

@@ -480,10 +480,6 @@ static int install_kernel_modules(Options *op,  Package *p)
     
     if (!determine_kernel_module_installation_path(op)) return FALSE;
 
-    /* check '/proc/sys/kernel/modprobe' */
-
-    if (!check_proc_modprobe_path(op)) return FALSE;
-
     /*
      * do nvchooser-style logic to decide if we have a prebuilt kernel
      * module for their kernel
